@@ -1,0 +1,28 @@
+name: threads-autopost
+on:
+  schedule:
+    - cron: "3,18,33,48 * * * *"
+  workflow_dispatch:
+concurrency:
+  group: autopost
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish due posts
+        env:
+          THREADS_TOKEN: ${{ secrets.THREADS_TOKEN }}
+        run: python3 autopost.py
+      - name: Save state
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "autopost-bot"
+            git config user.email "autopost-bot@users.noreply.github.com"
+            git add state.json
+            git commit -m "state: published posts"
+            git push
+          fi
