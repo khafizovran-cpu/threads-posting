@@ -12,6 +12,7 @@ STATE = HERE / "state.json"
 API = "https://graph.threads.net"
 MAX_LATE = timedelta(hours=3)   # опоздавшие больше чем на 3 часа не публикуются
 LIMIT = 500
+DEFAULT_TOPIC = "Психология"   # тег темы для поста; у записи в очереди можно задать свой: "topic"
 
 def call(method, path, params):
     data = urllib.parse.urlencode(params).encode()
@@ -50,10 +51,10 @@ def media_params(token, uid, media):
         kids.append(kid)
     return {"media_type": "CAROUSEL", "children": ",".join(kids)}
 
-def publish_part(token, part, reply_to=None):
-    return publish_one(token, part, reply_to)
+def publish_part(token, part, reply_to=None, topic=None):
+    return publish_one(token, part, reply_to, topic)
 
-def publish_one(token, part, reply_to=None):
+def publish_one(token, part, reply_to=None, topic=None):
     text, media = (part, []) if isinstance(part, str) else (part["text"], part.get("media", []))
     uid = call("GET", "/v1.0/me", {"fields": "id", "access_token": token})["id"]
     params = {"media_type": "TEXT", "text": text, "access_token": token}
@@ -61,7 +62,15 @@ def publish_one(token, part, reply_to=None):
         params.update(media_params(token, uid, media))
     if reply_to:
         params["reply_to_id"] = reply_to
-    c = call("POST", f"/v1.0/{uid}/threads", params)
+    elif topic:
+        params["topic_tag"] = topic
+    try:
+        c = call("POST", f"/v1.0/{uid}/threads", params)
+    except RuntimeError as e:
+        if "topic_tag" not in params: raise
+        print(f"тег «{topic}» не принят ({e}), публикую без тега")
+        params.pop("topic_tag")
+        c = call("POST", f"/v1.0/{uid}/threads", params)
     if media:
         wait_ready(token, c["id"])
     else:
@@ -118,7 +127,7 @@ def main():
         if not token: sys.exit("THREADS_TOKEN не задан")
         try:
             for i in range(len(ids), len(parts)):
-                ids.append(publish_part(token, parts[i], ids[-1] if ids else None))
+                ids.append(publish_part(token, parts[i], ids[-1] if ids else None, p.get("topic", DEFAULT_TOPIC)))
                 state[p["id"]] = {"ids": ids}; changed = True
                 STATE.write_text(json.dumps(state, indent=1, ensure_ascii=False))
                 if i + 1 < len(parts): time.sleep(5)
